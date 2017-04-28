@@ -8,3 +8,6 @@ switch: switch.o netutil.o hash.o
 
 switch.o: switch.c
 	$(CC) -c switch.c
+
+clean:
+	rm switch

@@ -14,14 +14,15 @@
 #include "netutil.h"
 #include "hash.h"
 
-PARAM Param = {"eth0", "eth1", "eth2", 1};
-DEVICE Device[SOCK];
+struct param prm = {"eth0", "eth1", "eth2", 1};
+struct device dev[SOCK];
 
-int EndFlag = 0;
+int end_flag = 0;
 
-extern int DebugPrintf(char *fmt, ...)
+extern int
+debug_printf(char *fmt, ...)
 {
-	if(Param.DebugOut) {
+	if (prm.debug) {
 		va_list args;
 
 		va_start(args, fmt);
@@ -33,130 +34,131 @@ extern int DebugPrintf(char *fmt, ...)
 
 }
 
-extern int DebugPerror(char *msg)
+extern int
+debug_perror(char *msg)
 {
-	if(Param.DebugOut) {
+	if (prm.debug)
 		fprintf(stderr, "%s : %s\n", msg, strerror(errno));
-	}
 
 	return 0;
 }
 
-int broadCastFrame(int no, char *buf, int size)                                                                         
+int
+send_broadcast(int no, char *buf, int size)
 {
-    int i;
+	int i;
 
-    for (i = 0; i < SOCK; i++) {
-        if (i != no) {
-            if ((size = write(Device[i].sock, buf, size)) <= 0) {
-                perror("write");
-            }
-        }
-    }
-    
-    return size;
+	for (i = 0; i < SOCK; i++) {
+		if (i != no) {
+			if ((size = write(dev[i].sock, buf, size)) <= 0)
+				perror("write");
+		}
+	}
 
+	return size;
 }
 
-static int Switch()
+static int
+switch_loop()
 {
-	struct epoll_event ev, ev_ret[MAXEVENTS];   
-	Hash hash;
+	struct epoll_event ev, ev_ret[MAXEVENTS];
+	struct hash hash;
+	struct data tmp;
+	struct __node *node;
 	int epfd, nfds, i, j, size;
 	u_char buf[4096];
 
 	epfd = epoll_create(MAXEVENTS);
-    if (epfd < 0){
-        perror("epoll_create: ");
-        return -1;
-    }
+	if (epfd < 0){
+		perror("epoll_create: ");
+		return -1;
+	}
 
-    // register sock to epoll
-    for (i = 0; i < SOCK; i++) {
+	// register sock to epoll
+	for (i = 0; i < SOCK; i++) {
 		memset(&ev, 0, sizeof(ev));
-    	ev.events = EPOLLIN;
-    	ev.data.fd = Device[i].sock;
-    	if (epoll_ctl(epfd, EPOLL_CTL_ADD, Device[i].sock, &ev) != 0){
-        	perror("epoll_ctl sock0: ");
-        	return -1;
+		ev.events = EPOLLIN;
+		ev.data.fd = dev[i].sock;
+		if (epoll_ctl(epfd, EPOLL_CTL_ADD, dev[i].sock, &ev) != 0){
+			perror("epoll_ctl sock0: ");
+			return -1;
 		}
-    }
-	
- 	InitHash(&hash, 4096);
+	}
 
-	while(EndFlag == 0) {
-		DATA	tmp;
-		Node	*node;
-		int 	ret;
+	init_hash(&hash, 4096);
+
+	while(end_flag == 0) {
+		int	ret;
 
 		nfds = epoll_wait(epfd, ev_ret, MAXEVENTS, -1);
-        if (nfds <= 0) {
-            perror("epoll_wait:");
-        	return -1;
+		if (nfds <= 0) {
+			perror("epoll_wait:");
+			return -1;
+		}
         }
-	
-        for(i = 0; i < nfds; i++) {
-			for (j = 0; j < SOCK; j++) {
-				if (ev_ret[i].data.fd == Device[j].sock) {
-					// frame recv
-					if ((size = read(Device[j].sock, buf, sizeof(buf))) <= 0) {
-						perror("read");
-					}
-		
-					// get src addr and dst addr and socket
-					tmp = AnalyzePacket(j, buf, size);
-					tmp.sock = Device[j].sock;
 
-					// check broadcast frame
-					if (strcmp(tmp.daddr, "ffffffffffff") == 0) {
-						if ((size = broadCastFrame(j, buf, size)) <= 0) {
-					   		perror("broadcast write");
-						}
+        for(i = 0; i < nfds; i++) {
+		for (j = 0; j < SOCK; j++) {
+			if (ev_ret[i].data.fd == dev[j].sock) {
+				// frame recv
+				if ((size = read(dev[j].sock, buf, sizeof(buf))) <= 0)
+					perror("read");
+
+				// get src addr and dst addr and socket
+				tmp = analyze_packet(j, buf, size);
+				tmp.sock = dev[j].sock;
+
+				// check broadcast frame
+				if (strcmp(tmp.daddr, "ffffffffffff") == 0) {
+					if ((size = send_broadcast(j, buf, size)) <= 0)
+						perror("broadcast write");
+
+					memset(tmp.daddr, 0, sizeof(tmp.daddr));
+					insert_node(&hash, tmp);
+				// unicast frame
+				} else {
+					// not found dst addr
+					node = search_node(&hash, tmp);
+					if(node == NULL) {
+						if ((size = send_broadcast(j, buf, size)) <= 0)
+							perror("broadcast write");
+
 						memset(tmp.daddr, 0, sizeof(tmp.daddr));
-						InsertNode(&hash, tmp);
+						insert_node(&hash, tmp);
 					} else {
-						// not found dst addr
-						node = SearchNode(&hash, tmp);
-						if(node == NULL) {
-							if ((size = broadCastFrame(j, buf, size)) <= 0) {
-					   			perror("broadcast write");
-							}
-							memset(tmp.daddr, 0, sizeof(tmp.daddr));
-							InsertNode(&hash, tmp);
-						} else {
-						// found dst addr
-							if(Device[j].sock != node->data.sock) {
-								if ((size = write(node->data.sock, buf, size)) <= 0) {
-									perror("write");
-								}
-							}
-							memset(tmp.daddr, 0, sizeof(tmp.daddr));
-							InsertNode(&hash, tmp);
+					// found dst addr
+						if(dev[j].sock != node->data.sock) {
+							if ((size = write(node->data.sock, buf, size)) <= 0)
+								perror("write");
 						}
+
+						memset(tmp.daddr, 0, sizeof(tmp.daddr));
+						insert_node(&hash, tmp);
 					}
 				}
 			}
 		}
-		if(Param.DebugOut) {
-			DumpHash(&hash);
-		}
+
+		if (prm.debug)
+			dump_hash(&hash);
 	}
 
-	TermHash(&hash); 
+	term_hash(&hash);
 
 	return 0;
 
 }
 
-static int DisableIpForward()
+static int
+disable_ip_forward()
 {
 	FILE *fp;
-		
+
 	if ((fp = fopen("/proc/sys/net/ipv4/ip_forward", "w")) == NULL) {
-		DebugPrintf("cannot write /proc/sys/net/ipv4/ip_forward\n");
+		debug_printf("cannot write /proc/sys/net/ipv4/ip_forward\n");
 		return -1;
 	}
-	
+
 	fputs("0", fp);
 	fclose(fp);
 
@@ -164,46 +166,51 @@ static int DisableIpForward()
 
 }
 
-static void EndSignal(int sig)
+static void
+end_signal(int sig)
 {
-	EndFlag = 1;
+	end_flag = 1;
 }
 
-int main(int argc, char *argv[], char *envp[])
+int
+main(int argc, char *argv[], char *envp[])
 {
-	
-	if ((Device[0].sock = InitRawSocket(Param.Device1)) == -1) {
-		DebugPrintf("InitRasSocket:error:%s\n", Param.Device1);
+
+	if ((dev[0].sock = init_rawsocket(prm.device1)) == -1) {
+		debug_printf("init_rawsocket:error:%s\n", prm.device1);
 		return -1;
 	}
-	DebugPrintf("%s OK\n", Param.Device1);
 
-	if ((Device[1].sock = InitRawSocket(Param.Device2)) == -1) {
-		DebugPrintf("InitRasSocket:error:%s\n", Param.Device2);
+	debug_printf("%s OK\n", prm.device1);
+
+	if ((dev[1].sock = init_rawsocket(prm.device2)) == -1) {
+		debug_printf("init_rawsocket:error:%s\n", prm.device2);
 		return -1;
 	}
-	DebugPrintf("%s OK\n", Param.Device2);
 
-	if ((Device[2].sock = InitRawSocket(Param.Device3)) == -1) {
-		DebugPrintf("InitRasSocket:error:%s\n", Param.Device3);
+	debug_printf("%s OK\n", prm.device2);
+
+	if ((dev[2].sock = init_rawsocket(prm.device3)) == -1) {
+		debug_printf("init_rawsocket:error:%s\n", prm.device3);
 		return -1;
 	}
-	DebugPrintf("%s OK\n", Param.Device3);
 
-	DisableIpForward();
+	debug_printf("%s OK\n", prm.device3);
 
-	signal(SIGINT, EndSignal);
-	signal(SIGKILL, EndSignal);
-	signal(SIGTERM, EndSignal);
-	signal(SIGQUIT, EndSignal);
-	signal(SIGTTIN, EndSignal);
-	signal(SIGTTOU, EndSignal);
+	disable_ip_forward();
 
-	Switch();
+	signal(SIGINT, end_signal);
+	signal(SIGKILL, end_signal);
+	signal(SIGTERM, end_signal);
+	signal(SIGQUIT, end_signal);
+	signal(SIGTTIN, end_signal);
+	signal(SIGTTOU, end_signal);
 
-	close(Device[0].sock);
-	close(Device[1].sock);
-	close(Device[2].sock);
+	switch_loop();
+
+	close(dev[0].sock);
+	close(dev[1].sock);
+	close(dev[2].sock);
 
 	return 0;
 

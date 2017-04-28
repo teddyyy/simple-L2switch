@@ -1,33 +1,33 @@
-typedef struct {
-	char	*Device1;
-	char 	*Device2;
-	char 	*Device3;
-	int		DebugOut;
-} PARAM;
+struct param {
+	char	*device1;
+	char	*device2;
+	char	*device3;
+	int	debug;
+};
 
-typedef struct {
-	int 	sock;
-} DEVICE;
+struct device {
+	int	sock;
+};
 
-typedef struct {
-    char    saddr[13];
-    char    daddr[13];
-    int     sock;
-} DATA;
+struct data {
+	char    saddr[13];
+	char    daddr[13];
+	int     sock;
+};
 
-typedef struct __node {
-    DATA     data; 
-    struct __node  *next; 
-} Node;
+struct __node {
+	struct	data	data;
+	struct	__node	*next;
+};
 
-typedef struct {
-    int   size;                     
-	Node  **table;              
-} Hash;
+struct hash {
+	int   size;
+	struct	__node  **table;
+};
 
-extern int DebugPrintf(char *fmt, ...);
-extern int DebugPerror(char *msg);
+extern int debug_printf(char *fmt, ...);
+extern int debug_perror(char *msg);
 
-#define MAXEVENTS 16 
-#define SOCK 3 
+#define MAXEVENTS 16
+#define SOCK 3
 #define HASHSIZE 4096

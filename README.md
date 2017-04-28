@@ -1,1 +1,1 @@
-# simple-switch
+# simple-L2switch
